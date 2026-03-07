@@ -75,11 +75,14 @@ jobs:
           XAPK_NAME: ${{ inputs.xapk_name }}
         run: |
           echo "Decompiling..."
-          apktool d -f -r -s temp_merged.apk -o build_dir
+          apktool d -f -s temp_merged.apk -o build_dir
           
           cd build_dir
           echo "Patching AndroidManifest.xml..."
-          
+
+          # Ensure decoded
+          grep "<manifest " AndroidManifest.xml > /dev/null || (echo "Failed to decode AndroidManifest.xml" && exit 1) 
+
           # remove:
           # android:isSplitRequired="true"
           # android:requiredSplitTypes="base__abi"
@@ -88,10 +91,7 @@ jobs:
           sed -i -E 's/android:requiredSplitTypes="[^"]*"//g' AndroidManifest.xml
           sed -i -E 's/android:extractNativeLibs="[^"]*"//g' AndroidManifest.xml
           
-          grep "application" AndroidManifest.xml || true
-          
           cd ..
-          
           echo "Rebuilding..."
 
           UNSIGNED_APK_NAME="${XAPK_NAME%.xapk}-unsigned.apk"

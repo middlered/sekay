@@ -123,16 +123,6 @@ jobs:
           echo Target version url: $URL
           # wget $URL -O application.xapk
           
-          RESULT=$(curl -IsL -w "%{http_code} %{content_type}" "$URL" -o /dev/null)
-
-          STATUS_CODE=$(echo $RESULT | cut -d' ' -f1)
-          CONTENT_TYPE=$(echo $RESULT | cut -d' ' -f2)
-
-          if [ "$STATUS_CODE" -ne 200 ]; then
-              echo Invalid Url: $STATUS_CODE
-              exit 1
-          fi
-
           aria2c -x16 -s16 -k1M \
             --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" $URL \
             -o application.xapk
