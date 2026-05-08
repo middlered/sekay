@@ -53,9 +53,8 @@ jobs:
       - name: Checkout Converter Tool
         uses: actions/checkout@v4
         with:
-          repository: LuigiVampa92/xapk-to-apk
+          repository: middlered/xapk-to-apk
           path: xapk-tool-repo
-          ref: 4b34f1728815b00c04d2e8170b5728513e8a09cf  # pinned
 
       - name: Convert XAPK to APK
         env:
@@ -69,6 +68,12 @@ jobs:
           APK_NAME="${XAPK_NAME%.xapk}.apk"
 
           mv $APK_NAME temp_merged.apk
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: temp_merged.apk
+          path: temp_merged.apk
 
       - name: Modify Manifest Attributes
         env:
