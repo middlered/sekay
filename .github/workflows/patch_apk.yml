@@ -1,0 +1,146 @@
+name: Patch APK with Objection
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        description: APK artifact to patch
+        required: false
+        default: application.apk
+        type: string
+      frida_version:
+        description: Frida Gadget version; leave empty to use the latest version
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  patch:
+    name: Patch APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: artifact
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install Android patching tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes aapt adb apksigner apktool zipalign
+
+      - name: Find APK
+        id: apk
+        shell: bash
+        run: |
+          APK_PATH=$(find artifact -type f -name '*.apk' -print -quit)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found in artifact '${{ inputs.artifact_name }}'" >&2
+            exit 1
+          fi
+
+          APK_FILENAME=$(basename "$APK_PATH")
+          APK_BASENAME="${APK_FILENAME%.apk}"
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "basename=$APK_BASENAME" >> "$GITHUB_OUTPUT"
+
+      - name: Patch APK
+        id: patch
+        shell: bash
+        env:
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          APK_BASENAME: ${{ steps.apk.outputs.basename }}
+          FRIDA_VERSION: ${{ inputs.frida_version }}
+        run: |
+          FRIDA_ARGS=()
+          FRIDA_LABEL="latest"
+          if [ -n "$FRIDA_VERSION" ]; then
+            FRIDA_ARGS+=(--gadget-version "$FRIDA_VERSION")
+            FRIDA_LABEL="$FRIDA_VERSION"
+          fi
+
+          uvx objection patchapk \
+            --source "$APK_PATH" \
+            --architecture arm64-v8a \
+            --skip-resources \
+            --ignore-nativelibs \
+            "${FRIDA_ARGS[@]}"
+
+          OUTPUT_APK="${APK_BASENAME}-frida-${FRIDA_LABEL}.apk"
+          mv "${APK_PATH%.apk}.objection.apk" "$OUTPUT_APK"
+          echo "path=$OUTPUT_APK" >> "$GITHUB_OUTPUT"
+
+      - name: Verify patched APK
+        shell: bash
+        env:
+          PATCHED_APK: ${{ steps.patch.outputs.path }}
+        run: |
+          echo "Verifying $PATCHED_APK"
+          unzip -tq "$PATCHED_APK"
+          unzip -Z1 "$PATCHED_APK" | grep -qx 'lib/arm64-v8a/libfrida-gadget.so'
+          unzip -p "$PATCHED_APK" 'classes*.dex' > patched-classes.dex
+          strings patched-classes.dex | grep -Fq 'frida-gadget'
+          apksigner verify --verbose "$PATCHED_APK"
+
+          rm -f patched-classes.dex
+
+      - name: Upload patched APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-apk-frida-${{ inputs.frida_version || 'latest' }}
+          if-no-files-found: error
+          retention-days: 14
+          path: ${{ steps.patch.outputs.path }}
+
+  verify-artifact:
+    name: Verify uploaded APK
+    needs: patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download patched APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-apk-frida-${{ inputs.frida_version || 'latest' }}
+          path: patched-apk
+
+      - name: Verify downloaded APK
+        shell: bash
+        env:
+          FRIDA_VERSION: ${{ inputs.frida_version }}
+        run: |
+          mapfile -t APKS < <(find patched-apk -maxdepth 1 -type f -name '*.apk' -print)
+          if [ "${#APKS[@]}" -ne 1 ]; then
+            echo "Expected exactly 1 patched APK, found ${#APKS[@]}" >&2
+            exit 1
+          fi
+
+          FRIDA_LABEL="${FRIDA_VERSION:-latest}"
+          PATCHED_APK="${APKS[0]}"
+          [[ "$PATCHED_APK" == *"-frida-${FRIDA_LABEL}.apk" ]]
+
+          echo "Verifying downloaded artifact file: $PATCHED_APK"
+          unzip -tq "$PATCHED_APK"
+          unzip -Z1 "$PATCHED_APK" | grep -qx 'lib/arm64-v8a/libfrida-gadget.so'
+          unzip -p "$PATCHED_APK" 'classes*.dex' > patched-classes.dex
+          strings patched-classes.dex | grep -Fq 'frida-gadget'
+          sha256sum "$PATCHED_APK"
+
+          rm -f patched-classes.dex

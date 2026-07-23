@@ -40,7 +40,19 @@ jobs:
       app_version_code: ${{ needs.uni_env.outputs.app_version_code }}
       to_apk: true
       update_version: true
-  
+
+  patch-apk-fixed:
+    needs: get-package
+    if: needs.get-package.outputs.flow_skip != 'true'
+    uses: ./.github/workflows/patch_apk.yml
+    with:
+      frida_version: 16.2.1
+
+  patch-apk-latest:
+    needs: get-package
+    if: needs.get-package.outputs.flow_skip != 'true'
+    uses: ./.github/workflows/patch_apk.yml
+
   inital-analysis:
     needs: [uni_env, get-package]
     if: |
@@ -67,7 +79,7 @@ jobs:
   
   analysis-release:
     runs-on: ubuntu-latest
-    needs: [uni_env, get-package, inital-analysis, il2cpp-dumper]
+    needs: [uni_env, get-package, patch-apk-fixed, patch-apk-latest, inital-analysis, il2cpp-dumper]
     permissions:
       contents: write
     
@@ -83,7 +95,14 @@ jobs:
         with:
           name: application.apk
           path: release
-      
+
+      - name: Download patched APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: patched-apk-frida-*
+          merge-multiple: true
+          path: release
+
       - name: Download initial analysis
         uses: actions/download-artifact@v4
         with:
