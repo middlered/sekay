@@ -70,6 +70,7 @@ jobs:
     needs: [uni_env, inital-analysis]
     if: needs.uni_env.outputs.run_analyze == 'true'
     permissions:
+      actions: write
       contents: write
     uses: ./.github/workflows/il2cppdumper.yml
     secrets: inherit

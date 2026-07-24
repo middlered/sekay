@@ -21,6 +21,9 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+    outputs:
+      artifact_name: ${{ steps.frida.outputs.artifact_name }}
+      apk_name: ${{ steps.patch.outputs.apk_name }}
 
     steps:
       - name: Download APK artifact
@@ -36,6 +39,8 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
 
       - name: Install Android patching tools
         shell: bash
@@ -58,31 +63,55 @@ jobs:
           echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
           echo "basename=$APK_BASENAME" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve Frida version
+        id: frida
+        shell: bash
+        env:
+          INPUT_FRIDA_VERSION: ${{ inputs.frida_version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FRIDA_VERSION="$INPUT_FRIDA_VERSION"
+          FRIDA_LABEL="$FRIDA_VERSION"
+
+          if [ -z "$FRIDA_VERSION" ]; then
+            FRIDA_VERSION=$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              https://api.github.com/repos/frida/frida/releases/latest \
+              | jq -r '.tag_name')
+            FRIDA_VERSION="${FRIDA_VERSION#v}"
+            FRIDA_LABEL="${FRIDA_VERSION}-latest"
+          fi
+
+          if [[ ! "$FRIDA_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid Frida version: $FRIDA_VERSION" >&2
+            exit 1
+          fi
+
+          echo "version=$FRIDA_VERSION" >> "$GITHUB_OUTPUT"
+          echo "label=$FRIDA_LABEL" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=patched-apk-frida-${FRIDA_LABEL}" >> "$GITHUB_OUTPUT"
+
       - name: Patch APK
         id: patch
         shell: bash
         env:
           APK_PATH: ${{ steps.apk.outputs.path }}
           APK_BASENAME: ${{ steps.apk.outputs.basename }}
-          FRIDA_VERSION: ${{ inputs.frida_version }}
+          FRIDA_VERSION: ${{ steps.frida.outputs.version }}
+          FRIDA_LABEL: ${{ steps.frida.outputs.label }}
         run: |
-          FRIDA_ARGS=()
-          FRIDA_LABEL="latest"
-          if [ -n "$FRIDA_VERSION" ]; then
-            FRIDA_ARGS+=(--gadget-version "$FRIDA_VERSION")
-            FRIDA_LABEL="$FRIDA_VERSION"
-          fi
-
           uvx objection patchapk \
             --source "$APK_PATH" \
+            --gadget-version "$FRIDA_VERSION" \
             --architecture arm64-v8a \
             --skip-resources \
-            --ignore-nativelibs \
-            "${FRIDA_ARGS[@]}"
+            --ignore-nativelibs
 
           OUTPUT_APK="${APK_BASENAME}-frida-${FRIDA_LABEL}.apk"
           mv "${APK_PATH%.apk}.objection.apk" "$OUTPUT_APK"
           echo "path=$OUTPUT_APK" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$OUTPUT_APK" >> "$GITHUB_OUTPUT"
 
       - name: Verify patched APK
         shell: bash
@@ -101,7 +130,7 @@ jobs:
       - name: Upload patched APK
         uses: actions/upload-artifact@v4
         with:
-          name: patched-apk-frida-${{ inputs.frida_version || 'latest' }}
+          name: ${{ steps.frida.outputs.artifact_name }}
           if-no-files-found: error
           retention-days: 14
           path: ${{ steps.patch.outputs.path }}
@@ -118,13 +147,13 @@ jobs:
       - name: Download patched APK artifact
         uses: actions/download-artifact@v4
         with:
-          name: patched-apk-frida-${{ inputs.frida_version || 'latest' }}
+          name: ${{ needs.patch.outputs.artifact_name }}
           path: patched-apk
 
       - name: Verify downloaded APK
         shell: bash
         env:
-          FRIDA_VERSION: ${{ inputs.frida_version }}
+          EXPECTED_APK_NAME: ${{ needs.patch.outputs.apk_name }}
         run: |
           mapfile -t APKS < <(find patched-apk -maxdepth 1 -type f -name '*.apk' -print)
           if [ "${#APKS[@]}" -ne 1 ]; then
@@ -132,9 +161,11 @@ jobs:
             exit 1
           fi
 
-          FRIDA_LABEL="${FRIDA_VERSION:-latest}"
           PATCHED_APK="${APKS[0]}"
-          [[ "$PATCHED_APK" == *"-frida-${FRIDA_LABEL}.apk" ]]
+          if [ "$(basename "$PATCHED_APK")" != "$EXPECTED_APK_NAME" ]; then
+            echo "Expected $EXPECTED_APK_NAME, found $(basename "$PATCHED_APK")" >&2
+            exit 1
+          fi
 
           echo "Verifying downloaded artifact file: $PATCHED_APK"
           unzip -tq "$PATCHED_APK"
