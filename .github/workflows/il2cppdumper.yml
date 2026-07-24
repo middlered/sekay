@@ -15,7 +15,6 @@ on:
       artifact_name:
         required: true
         type: string
-        default: "inital_analysis"
       binary_name:
         required: true
         type: string
@@ -25,6 +24,9 @@ jobs:
   dumper:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: read
 
     steps:
       # Build Il2cppDumper on linux
@@ -128,9 +130,29 @@ jobs:
         with:
           name: il2cpp_analysis
           path: ./analysis
+          overwrite: true
+
+      - name: Remove duplicate artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t DUPLICATE_IDS < <(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            --jq '.artifacts
+              | map(select(.name == "il2cpp_analysis"))
+              | sort_by(.id)
+              | reverse
+              | .[1:][]
+              | .id')
+
+          for artifact_id in "${DUPLICATE_IDS[@]}"; do
+            echo "Deleting duplicate il2cpp_analysis artifact $artifact_id"
+            gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+          done
       
       # - name: Setup tmate session
       #   uses: mxschmitt/action-tmate@v3
       #   with:
       #     limit-access-to-actor: false
-      
