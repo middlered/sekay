@@ -9,6 +9,9 @@ on:
       binary_name:
         required: true
         type: string
+      app_version:
+        required: false
+        type: string
       
 jobs:
   analyze:
@@ -31,6 +34,8 @@ jobs:
           path: artifact
 
       - name: Collect info
+        env:
+          PROVIDED_APP_VERSION: ${{ inputs.app_version }}
         run: |
           mkdir -p /tmp/package
           mkdir -p /home/runner/release
@@ -40,9 +45,19 @@ jobs:
           ls /tmp/package
 
           APP_PACKAGE=$(find . -type f \( -name "*.ipa" -o -name "*.apk" \) | head -n 1)
-          VERSION=$(echo $APP_PACKAGE | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+          VERSION=$(echo "$APP_PACKAGE" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)
 
-          cp $APP_PACKAGE /home/runner/release/
+          if [ -z "$VERSION" ]; then
+            echo "Warning: Failed to extract version from file name, trying PROVIDED_APP_VERSION..."
+            VERSION="$PROVIDED_APP_VERSION"
+          fi
+
+          if [ -z "$VERSION" ]; then
+            echo "Error: Version is empty and no valid input version provided"
+            exit 1
+          fi
+
+          cp "$APP_PACKAGE" /home/runner/release/
 
           echo "APP_PACKAGE=$APP_PACKAGE, VERSION=$VERSION"
           
