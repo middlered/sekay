@@ -20,6 +20,10 @@ on:
         required: false
         default: true
         type: boolean
+      force_analyze:
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   uni_env:
@@ -58,7 +62,7 @@ jobs:
     needs: [uni_env, get-package]
     if: |
       needs.uni_env.outputs.run_analyze == 'true' && 
-      needs.get-package.outputs.flow_skip != 'true'
+      (needs.get-package.outputs.flow_skip != 'true' || inputs.force_analyze)
     permissions:
       contents: write
     uses: ./.github/workflows/analyze.yml
