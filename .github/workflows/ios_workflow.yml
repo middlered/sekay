@@ -91,19 +91,19 @@ jobs:
     
     steps:    
       - name: Download ipa artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: application.ipa
           path: release
       
       - name: Download initial analysis
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: initial_analysis
           path: initial_analysis
       
       - name: Download il2cpp analysis
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: il2cpp_analysis
           path: il2cpp_analysis
@@ -126,7 +126,7 @@ jobs:
           (cd il2cpp_analysis && zip -r ../release/il2cpp_analysis.zip .)
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ env.RELEASE_TITLE }}
           tag_name: ${{ env.RELEASE_TAG }}

@@ -15,7 +15,6 @@ on:
       artifact_name:
         required: true
         type: string
-        default: "inital_analysis"
       binary_name:
         required: true
         type: string
@@ -29,14 +28,14 @@ jobs:
     steps:
       # Build Il2cppDumper on linux
       - name: Checkout Il2cppDumper
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: 'Perfare/Il2CppDumper'
           path: 'il2cppdumper_repo'
           fetch-depth: 1
 
       - name: Setup .NET for build
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
 
@@ -46,6 +45,7 @@ jobs:
           dotnet publish Il2CppDumper/Il2CppDumper.csproj \
             -c Release \
             -f net8.0 \
+            -p:TargetFrameworks=net8.0 \
             -r linux-x64 \
             --self-contained false \
             -o ../build_linux
@@ -55,13 +55,13 @@ jobs:
           ./build_linux/Il2CppDumper
     
       - name: Checkout Scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: 'work_repo'
           fetch-depth: 1
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.artifact_name }}
           path: initial_analysis
@@ -124,7 +124,7 @@ jobs:
             /home/workspace/${BINARY_NAME}.i64 | tee -a ./analysis/output.log
       
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: il2cpp_analysis
           path: ./analysis

@@ -9,6 +9,11 @@ on:
         description: 'App Version Code'
         required: false
         type: string
+      download_url:
+        description: 'Direct XAPK download URL (overrides App Version Code)'
+        required: false
+        type: string
+        default: ''
       run_analyze:
         required: false
         default: true
@@ -19,17 +24,24 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app_version_code: ${{ steps.combiner.outputs.app_version_code }}
+      download_url: ${{ steps.combiner.outputs.download_url }}
       run_analyze: ${{ steps.combiner.outputs.run_analyze }}
     steps:
       - id: combiner
+        env:
+          VERSION: ${{ github.event.inputs.app_version_code || github.event.client_payload.app_version_code }}
+          DOWNLOAD_URL: ${{ github.event.inputs.download_url || github.event.client_payload.download_url }}
+          ANALYZE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_analyze || toJSON(github.event.client_payload.run_analyze) }}
         run: |
-          VERSION="${{ github.event.inputs.app_version_code || github.event.client_payload.app_version_code }}"
-          ANALYZE="${{ github.event.inputs.run_analyze || github.event.client_payload.run_analyze }}"
-  
-          if [ -z "$ANALYZE" ]; then ANALYZE="true"; fi
+          if [ -z "$ANALYZE" ] || [ "$ANALYZE" = "null" ]; then ANALYZE="true"; fi
+          if [[ "$DOWNLOAD_URL" == *$'\n'* || "$DOWNLOAD_URL" == *$'\r'* ]]; then
+            echo "Download URL must be a single line" >&2
+            exit 1
+          fi
 
-          echo "app_version_code=$VERSION" >> $GITHUB_OUTPUT
-          echo "run_analyze=$ANALYZE" >> $GITHUB_OUTPUT
+          echo "app_version_code=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+          echo "run_analyze=$ANALYZE" >> "$GITHUB_OUTPUT"
 
   get-package:
     needs: uni_env
@@ -38,6 +50,7 @@ jobs:
     uses: ./.github/workflows/apkpure.yml
     with:
       app_version_code: ${{ needs.uni_env.outputs.app_version_code }}
+      download_url: ${{ needs.uni_env.outputs.download_url }}
       to_apk: true
       update_version: true
 
@@ -86,32 +99,32 @@ jobs:
     
     steps:  
       - name: Download xapk artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: application.xapk
           path: release
       
       - name: Download apk artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: application.apk
           path: release
 
       - name: Download patched APK artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: patched-apk-frida-*
           merge-multiple: true
           path: release
 
       - name: Download initial analysis
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: initial_analysis
           path: initial_analysis
       
       - name: Download il2cpp analysis
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: il2cpp_analysis
           path: il2cpp_analysis
@@ -134,7 +147,7 @@ jobs:
           (cd il2cpp_analysis && zip -r ../release/il2cpp_analysis.zip .)
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ env.RELEASE_TITLE }}
           tag_name: ${{ env.RELEASE_TAG }}

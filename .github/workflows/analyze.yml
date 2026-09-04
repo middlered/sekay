@@ -23,12 +23,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:  
           fetch-depth: 1
       
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.artifact_name }}
           path: artifact
@@ -106,7 +106,7 @@ jobs:
           docker exec idap ./idat -B -L"/dev/stdout" /home/workspace/$BINARY_NAME | tee /home/runner/workspace/output.log
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: initial_analysis
           path: /home/runner/workspace

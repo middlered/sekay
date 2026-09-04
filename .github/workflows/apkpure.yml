@@ -6,6 +6,11 @@ on:
         description: 'App Version Code'
         required: false
         type: string
+      download_url:
+        description: 'Direct XAPK download URL (overrides App Version Code)'
+        required: false
+        type: string
+        default: ''
       to_apk:
         required: true
         default: true
@@ -22,9 +27,13 @@ on:
         description: 'App Version Code'
         required: false
         type: string
+      download_url:
+        description: 'Direct XAPK download URL (overrides App Version Code)'
+        required: false
+        type: string
+        default: ''
       to_apk:
         required: true
-        default: true
         type: boolean
       update_version:
         required: false
@@ -47,20 +56,26 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:  
           fetch-depth: 1
           path: work_repo
       
-      - name: Fetch Lastest XAPK
-        if: inputs.app_version_code == ''
+      - name: Fetch Latest or Direct XAPK
+        if: inputs.download_url != '' || inputs.app_version_code == ''
+        env:
+          DOWNLOAD_URL: ${{ inputs.download_url }}
         run: |
           echo "XAPK_FILE_EXIST=false" >> "$GITHUB_ENV"
           
-          # wget https://d.apkpure.net/b/XAPK/com.sega.pjsekai?version=latest -O application.xapk
+          URL="${DOWNLOAD_URL:-https://d.apkpure.net/b/XAPK/com.sega.pjsekai?version=latest}"
+          case "$URL" in
+            https://*|http://*) ;;
+            *) echo "Download URL must use HTTP or HTTPS" >&2; exit 1 ;;
+          esac
           aria2c -x16 -s16 -k1M \
             --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            "https://d.apkpure.net/b/XAPK/com.sega.pjsekai?version=latest" \
+            "$URL" \
             -o application.xapk
 
           unzip application.xapk manifest.json
@@ -72,8 +87,8 @@ jobs:
           HISTORY_FILE="./work_repo/android_history.json"
 
           # Extract latest version info from manifest.json
-          LATEST_VERSION_NAME=$(jq -r '.version_name' manifest.json)
-          LATEST_VERSION_CODE=$(jq -r '.version_code' manifest.json)
+          LATEST_VERSION_NAME=$(jq -er '.version_name | strings | select(test("^[0-9]+(\\.[0-9]+)+([.-][0-9A-Za-z.-]+)?$"))' manifest.json)
+          LATEST_VERSION_CODE=$(jq -er '.version_code | select(. != null) | tostring | select(test("^[0-9]+$"))' manifest.json)
 
           # Read current local version (returns empty if file doesn't exist)
           LOCAL_CURRENT_VERSION=$(cat "$VERSION_FILE" 2>/dev/null)
@@ -95,12 +110,6 @@ jobs:
             # Save the updated JSON back to the file
             echo "$tmp_json" > "$HISTORY_FILE"
             echo "Update complete. New record prepended to $HISTORY_FILE."
-            echo "XAPK_FILE_EXIST=true" >> "$GITHUB_ENV"
-
-            XAPK_NAME=${LATEST_VERSION_NAME}.xapk
-            mv application.xapk $XAPK_NAME
-            echo "XAPK_NAME=$XAPK_NAME" >> "$GITHUB_ENV"
-
             # Prepare version change commit
             echo "VERSION_UPDATED=true" >> "$GITHUB_ENV"
 
@@ -110,10 +119,18 @@ jobs:
             echo "Version is up to date. Skipping update."
           fi
 
+          # Explicit URLs must also produce an artifact for an already known version.
+          if [ "$LOCAL_CURRENT_VERSION" != "$LATEST_VERSION_NAME" ] || [ -n "$DOWNLOAD_URL" ]; then
+            XAPK_NAME="${LATEST_VERSION_NAME}.xapk"
+            mv application.xapk "$XAPK_NAME"
+            echo "XAPK_NAME=$XAPK_NAME" >> "$GITHUB_ENV"
+            echo "XAPK_FILE_EXIST=true" >> "$GITHUB_ENV"
+          fi
+
           echo "app_version=$LATEST_VERSION_NAME" >> $GITHUB_ENV
       
       - name: Fetch Specific XAPK
-        if: inputs.app_version_code != ''
+        if: inputs.download_url == '' && inputs.app_version_code != ''
         env:
           VERSION_CODE: ${{ inputs.app_version_code }}
         run: |
@@ -145,7 +162,7 @@ jobs:
 
       - name: Upload Artifact        
         if: env.XAPK_FILE_EXIST == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: application.xapk
           path: ${{ env.XAPK_NAME }}
@@ -196,21 +213,21 @@ jobs:
       (needs.merge_apk.result == 'success' || needs.merge_apk.result == 'skipped')
     steps:
       # - name: Checkout
-      #   uses: actions/checkout@v4
+      #   uses: actions/checkout@v5
       #   with:  
       #     fetch-depth: 1
       #     ref: main
       #     path: work_repo
   
       - name: Download xapk artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: application.xapk
           path: artifact
       
       - name: Download apk artifact
         if: inputs.to_apk
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: application.apk
           path: artifact
@@ -242,7 +259,7 @@ jobs:
           echo "RELEASE_TITLE=$RELEASE_TITLE" >> $GITHUB_ENV
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ env.RELEASE_TITLE }}
           tag_name: ${{ env.RELEASE_TAG }}
